@@ -13,10 +13,20 @@ let rs = { round: Math.floor(Date.now() / 1000), start: Date.now() + 2000 };
 function nextRound(breakMs) {
   rs = { round: rs.round + 1, start: Date.now() + breakMs };
   io.emit('round', rs);
+  setCup({ round: rs.round, phase: 'kadra' });
+}
+const CUP_HOLD_MS = 10 * 1000;              // цомыг 10 секунд хамгаалбал ялна
+// цомын төлөв: kadra (Кадра амьд) → dropped (газарт) → carried (хэн нэгний гарт) → won
+let cup = { round: rs.round, phase: 'kadra' };
+function setCup(c) { cup = c; io.emit('cup', cup); }
+function dropFromCarrier() {
+  const p = players.get(cup.carrier);
+  const x = p && p.state ? p.state.x : cup.x, z = p && p.state ? p.state.z : cup.z;
+  setCup({ round: cup.round, phase: 'dropped', x, z, at: Date.now() });
 }
 
 const app = express();
-const VERSION = 'v4';
+const VERSION = 'v5';
 // index.html-ийг хөтөч хадгалж (cache) үлдээхгүй — шинэ хувилбар шууд харагдана
 app.use(express.static(path.join(__dirname, 'public'), { setHeaders: res => res.setHeader('Cache-Control', 'no-cache') }));
 app.get('/health', (req, res) => res.send('ok ' + VERSION));
@@ -33,7 +43,7 @@ const num = v => (Number.isFinite(+v) ? +v : 0);
 
 io.on('connection', socket => {
   players.set(socket.id, { pid: null, name: 'Тоглогч', state: null });
-  socket.emit('welcome', { now: Date.now(), id: socket.id, rounds, rs });
+  socket.emit('welcome', { now: Date.now(), id: socket.id, rounds, rs, cup });
 
   socket.on('join', d => {
     const p = players.get(socket.id); if (!p || !d) return;
@@ -64,20 +74,30 @@ io.on('connection', socket => {
     socket.broadcast.emit('ev:' + topic, { from: socket.id, data });
   });
 
-  // Кадраг хэн түрүүлж алсныг сервер шийднэ
-  socket.on('claim', d => {
-    const R = rs.round;
-    if (!d || num(d.round) !== R || winnerOf.has(R) || Date.now() < rs.start) return;
+  // Кадра алагдаж цом унав (хамгийн түрүүнд ирсэн мэдээг авна)
+  socket.on('cup:drop', d => {
+    if (!d || num(d.round) !== rs.round || cup.round !== rs.round || cup.phase !== 'kadra' || Date.now() < rs.start) return;
+    const lim = 200;
+    setCup({ round: rs.round, phase: 'dropped', x: Math.max(-lim, Math.min(lim, num(d.x))), z: Math.max(-lim, Math.min(lim, num(d.z))), at: Date.now() });
+  });
+  // цом авах: тоглогч үнэхээр цомын дэргэд байгаа эсэхийг сервер шалгана
+  socket.on('cup:pick', () => {
+    if (cup.phase !== 'dropped' || cup.round !== rs.round) return;
     const p = players.get(socket.id);
-    const rec = { round: R, winner: str(d.winner, 40) || (p && p.pid) || socket.id, name: str(d.name) || (p ? p.name : 'Тоглогч'), at: Date.now() };
-    winnerOf.set(R, rec);
-    rounds.unshift(rec); if (rounds.length > 1000) rounds.pop();
-    io.emit('roundWon', rec);
-    io.emit('rounds', rounds);
-    nextRound(BREAK_KILL_MS);
+    if (!p || !p.state || p.state.ko) return;
+    if (Math.hypot(p.state.x - cup.x, p.state.z - cup.z) > 5) return;
+    setCup({ round: cup.round, phase: 'carried', x: cup.x, z: cup.z, carrier: socket.id, cpid: p.pid || socket.id, cname: p.name, since: Date.now() });
+  });
+  // цом барьсан тоглогч алагдав
+  socket.on('cup:lose', d => {
+    if (cup.phase !== 'carried' || cup.carrier !== socket.id) return;
+    setCup({ round: cup.round, phase: 'dropped', x: num(d && d.x), z: num(d && d.z), at: Date.now() });
   });
 
-  socket.on('disconnect', () => players.delete(socket.id));
+  socket.on('disconnect', () => {
+    if (cup.phase === 'carried' && cup.carrier === socket.id) dropFromCarrier();
+    players.delete(socket.id);
+  });
 });
 
 // бүх тоглогчийн байрлалыг секундэд 10 удаа илгээнэ
@@ -86,6 +106,22 @@ setInterval(() => {
   for (const [id, p] of players) if (p.state) peers.push({ peer: id, presence: p.state });
   io.volatile.emit('peers', peers);
 }, 100);
+
+// цом барьсан тоглогч 10 секунд амьд үлдвэл ялна
+setInterval(() => {
+  if (cup.phase !== 'carried') return;
+  const p = players.get(cup.carrier);
+  if (!p || (p.state && p.state.ko)) { dropFromCarrier(); return; }
+  if (Date.now() - cup.since >= CUP_HOLD_MS) {
+    const rec = { round: cup.round, winner: cup.cpid, name: cup.cname, at: Date.now() };
+    winnerOf.set(cup.round, rec);
+    rounds.unshift(rec); if (rounds.length > 1000) rounds.pop();
+    setCup({ ...cup, phase: 'won' });
+    io.emit('roundWon', rec);
+    io.emit('rounds', rounds);
+    nextRound(BREAK_KILL_MS);
+  }
+}, 200);
 
 // 3 минут дуусч хэн ч алаагүй бол дараагийн раунд
 setInterval(() => { if (Date.now() > rs.start + ROUND_MS) nextRound(BREAK_TIMEOUT_MS); }, 500);
