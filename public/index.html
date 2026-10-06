@@ -36,6 +36,7 @@ body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
 #hpNum{color:#fff;font-size:18px;font-weight:900;min-width:34px;text-align:right;font-variant-numeric:tabular-nums}
 .hpbar{flex:1;height:12px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);border-radius:6px}
 .hpbar i{background:#3ddc84;transition:width .15s, background .2s}
+#ver{position:fixed;left:6px;bottom:calc(4px + env(safe-area-inset-bottom,0px));font-size:10px;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.7)}
 #dmgFx{position:fixed;inset:0;pointer-events:none;z-index:3;opacity:0;transition:opacity .25s;
   background:radial-gradient(ellipse at center, transparent 55%, rgba(200,0,0,.55) 100%)}
 @media (pointer:coarse){#hudHp{bottom:calc(205px + env(safe-area-inset-bottom,0px))}}
@@ -165,6 +166,7 @@ body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
 <body>
 <div id="hudHp"><div id="ammoTxt" class="ammo"></div><div class="hprow"><span class="hpico">❤</span><div class="bar hpbar"><i id="php"></i></div><b id="hpNum">100</b></div></div>
 <div id="dmgFx"></div>
+<div id="ver">v4</div>
 <div id="compass"><div id="cstrip"></div><i id="cmark" class="hidden"></i><b id="cdeg">0</b></div>
 <div id="mission" class="panel hidden"><span class="mt" id="mlabel">Кадраг устга</span><b id="mtime">03:00</b><span class="md">Зай: <b id="mdist">?</b></span></div>
 <div id="endScreen" class="hidden"><div class="panel"><h2 id="endTitle"></h2><p id="endText"></p><button id="againBtn">Дахин тоглох</button></div></div>
@@ -381,15 +383,22 @@ function building(x,z,w,d,h,color,glass){
   addCollider(x,z,w,d,h); return m;
 }
 const colGeoCache = {};
+const COLS = new Map();   // багануудыг instanced-ээр нэг дор зурна
 function colLine(ax,az,bx,bz,n,h,r,mat,y=0,collide=false){
-  const key = h+'_'+r; const geo = colGeoCache[key] || (colGeoCache[key] = new THREE.CylinderGeometry(r,r*1.12,h,10));
+  const key = h+'_'+r+'_'+mat.uuid;
+  let e = COLS.get(key); if(!e) COLS.set(key, e = {geo:colGeoCache[h+'_'+r] || (colGeoCache[h+'_'+r] = new THREE.CylinderGeometry(r,r*1.12,h,10)), mat, pts:[]});
   for(let i=0;i<n;i++){
-    const t = n===1 ? 0.5 : i/(n-1);
-    const c = new THREE.Mesh(geo, mat); c.position.set(ax+(bx-ax)*t, y+h/2, az+(bz-az)*t);
-    c.castShadow = true; scene.add(c);
-    if(collide) addCollider(c.position.x, c.position.z, r*2, r*2, y+h);
+    const t = n===1 ? 0.5 : i/(n-1), x = ax+(bx-ax)*t, z = az+(bz-az)*t;
+    e.pts.push([x, y+h/2, z]);
+    if(collide) addCollider(x, z, r*2, r*2, y+h);
   }
 }
+function flushInstanced(geo, mat, pts, shadow){
+  const im = new THREE.InstancedMesh(geo, mat, pts.length), m = new THREE.Matrix4();
+  pts.forEach((p,i) => { m.makeTranslation(p[0],p[1],p[2]); im.setMatrixAt(i,m); });
+  im.castShadow = shadow; im.receiveShadow = true; im.frustumCulled = false; scene.add(im);
+}
+function flushCols(){ for(const e of COLS.values()) flushInstanced(e.geo, e.mat, e.pts, true); COLS.clear(); }
 function label(text,x,y,z){
   const tex = canvasTex(512,96,(g,w,h)=>{
     g.font = 'bold 40px "Segoe UI",system-ui,Arial,sans-serif';
@@ -551,11 +560,8 @@ for(const fx of [-10,10]){
 // --- гэрлийн шон, сандал ---
 const poleGeo = new THREE.CylinderGeometry(0.1,0.14,6,6), lampGeo = new THREE.BoxGeometry(0.5,0.35,0.5);
 const poleMat = M(0x2d3138), lampMat = new THREE.MeshBasicMaterial({color:0xfff1c4});
-function lamp(x,z){
-  const p = new THREE.Mesh(poleGeo,poleMat); p.position.set(x,3,z); p.castShadow = true;
-  const l = new THREE.Mesh(lampGeo,lampMat); l.position.set(x,6.1,z);
-  scene.add(p,l); addCollider(x,z,0.35,0.35,6);
-}
+const LAMPS = [];
+function lamp(x,z){ LAMPS.push([x,z]); addCollider(x,z,0.35,0.35,6); }
 for(let z=-85;z<=85;z+=20){ lamp(-108,z); lamp(108,z); }
 for(let x=-100;x<=100;x+=20) if(x!==0) lamp(x,-93);
 for(let a=0;a<8;a++) lamp(Math.cos(a*Math.PI/4)*36, 4+Math.sin(a*Math.PI/4)*36);
@@ -842,7 +848,8 @@ function groundAt(x,z,y){
     q.identity(); if(lm.instanceColor) lm.instanceColor.needsUpdate = true;
     lm.castShadow = true; tm.receiveShadow = lm.receiveShadow = true; tm.frustumCulled = lm.frustumCulled = false; scene.add(tm, lm);
   }
-  flushInstances(); flushDeco();
+  flushInstances(); flushDeco(); flushCols();
+  flushInstanced(poleGeo, poleMat, LAMPS.map(l=>[l[0],3,l[1]]), true); flushInstanced(lampGeo, lampMat, LAMPS.map(l=>[l[0],6.1,l[1]]), false);
   label('Орон сууц', 0, 30, -166);
 }
 
@@ -861,6 +868,8 @@ function groundAt(x,z,y){
   for(const I of interiors){ const a = -I.maxX, b = -I.minX; I.minX = a; I.maxX = b; }
 })();
 
+// хөдөлдөггүй барилга, объектуудын матрицыг кадр бүрт дахин тооцохгүй
+for(const o of scene.children.slice(WORLD_START)){ o.updateMatrixWorld(true); o.traverse(c => { c.matrixAutoUpdate = false; }); }
 const GRID = 16, cgrid = new Map();
 const gkey = (gx,gz) => (gx+500)*10000+(gz+500);
 (function buildGrid(){
@@ -1004,6 +1013,7 @@ const soleMat = stdMat(0x161412,0.9), shoeMat = stdMat(0x2b2420,0.6), beltMat = 
 const vestMat = stdMat(0x55603f,0.9), pouchMat = stdMat(0x4a5436,0.9), helmetMat = stdMat(0x4a5236,0.7), packMat = stdMat(0x6b6a50,0.9);
 const eyeMat = irisMat, bootMat = shoeMat;
 
+const LODG = {body:new THREE.CylinderGeometry(0.24,0.19,0.66,8), legs:new THREE.BoxGeometry(0.34,1.14,0.2), head:new THREE.SphereGeometry(0.14,8,6)};
 function makeHuman(o){
   const outer = new THREE.Group(), root = new THREE.Group(); outer.add(root);
   const ms = clothMat(o.shirt, o.hoodie?knitTex:fabricTex, 0.93), mp = clothMat(o.pants, o.jeans?denimTex:fabricTex, 0.9), mk = stdMat(o.skin,0.55), mh = new THREE.MeshStandardMaterial({color:o.hair, roughness:0.75, map:hairTex, envMap, envMapIntensity:0.4});
@@ -1090,7 +1100,13 @@ function makeHuman(o){
   };
   const armL = mkArm(1), armR = mkArm(-1), legL = mkLeg(1), legR = mkLeg(-1);
   const gunPivot = new THREE.Group(); root.add(gunPivot);
-  return {outer,root,torso,head,armL,armR,legL,legR,gunPivot,details,detailOn:true,mats:[ms,mp,mk,mh]};
+  // холын хувилбар: 3 энгийн хэсэг (зурах ачаалал 10 дахин бага)
+  const lod = new THREE.Group(); lod.visible = false; outer.add(lod);
+  const lb = new THREE.Mesh(LODG.body, ms); lb.position.y = 1.5; lb.scale.z = 0.62;
+  const ll = new THREE.Mesh(LODG.legs, mp); ll.position.y = 0.58;
+  const lh = new THREE.Mesh(LODG.head, mk); lh.position.y = 2.06;
+  lod.add(lb, ll, lh);
+  return {outer,root,torso,head,armL,armR,legL,legR,gunPivot,details,detailOn:true,lod,full:true,mats:[ms,mp,mk,mh]};
 }
 
 // гарыг буу руу сунгах (2 ястай IK)
@@ -1224,8 +1240,8 @@ function spawnNPC(pos){
   makeTag(f);
   npcs.push(f); return f;
 }
-for(let k=0;k<42;k++) spawnNPC(freePoint(0,-10,95,player.pos,5));
-for(let k=0;k<16;k++) spawnNPC(freePoint(0,0,190,player.pos,20));
+for(let k=0;k<28;k++) spawnNPC(freePoint(0,-10,95,player.pos,5));
+for(let k=0;k<10;k++) spawnNPC(freePoint(0,0,190,player.pos,20));
 
 function removeNPC(f){
   scene.remove(f.h.outer);
@@ -2178,6 +2194,8 @@ function updateHUD(dt){
   for(const n of npcs){
     const dpl = distXZ(n,player), near = dpl<LOD_DETAIL;
     const shown = dpl<LOD_DRAW || n.isKadra; if(n.h.outer.visible!==shown) n.h.outer.visible = shown;
+    const full = dpl<LOD_FULL || n.isKadra || n.state==='fight' || n===selected;
+    if(full!==n.h.full){ n.h.full = full; n.h.root.visible = full; n.h.lod.visible = !full; }
     if(near!==n.h.detailOn){ n.h.detailOn = near; for(const m of n.h.details) m.visible = near; }
     if(!n.tag || n.isKadra) continue;
     const vis = n.state!=='ko' && distXZ(n,player)<30;
@@ -2771,7 +2789,7 @@ function loop(now){
     for(const n of npcs.slice()) speeds.set(n, updateNPC(n,dt));
     separate();
     animate(player,dt,ps);
-    npcs.forEach(n => animate(n,dt,speeds.get(n)||0));
+    npcs.forEach(n => { if(n.h.full) animate(n,dt,speeds.get(n)||0); else n.h.outer.rotation.y = n.rotY; });
     updateHUD(dt);
     updateMission(dt);
     mpUpdate(dt, now);
@@ -2786,7 +2804,7 @@ function loop(now){
     lastAdapt = now;
     if(frameAvg>30 && !document.hidden && qualityTier<3){
       qualityTier++;
-      if(qualityTier===1){ LOD_DETAIL = 16; LOD_DRAW = 90; }
+      if(qualityTier===1){ LOD_DETAIL = 14; LOD_DRAW = 100; LOD_FULL = 30; }
       if(qualityTier===2){ sun.shadow.mapSize.set(1024,1024); if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map = null; } LOD_DRAW = 70; }
       if(qualityTier===3){ for(const n of npcs) n.h.outer.traverse(o=>{ if(o.isMesh) o.castShadow = false; }); }
     }
@@ -2794,7 +2812,7 @@ function loop(now){
   }
   requestAnimationFrame(loop);
 }
-let qualityTier = 0, LOD_DETAIL = 32, LOD_DRAW = 130;
+let qualityTier = 0, LOD_DETAIL = 26, LOD_DRAW = 130, LOD_FULL = 45;
 let frameN = 0, frameAvg = 16, lastFrameT = performance.now(), lastAdapt = performance.now();
 refreshWeaponBar(); buildVM();
 // initial pose

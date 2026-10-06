@@ -16,8 +16,10 @@ function nextRound(breakMs) {
 }
 
 const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/health', (req, res) => res.send('ok'));
+const VERSION = 'v4';
+// index.html-ийг хөтөч хадгалж (cache) үлдээхгүй — шинэ хувилбар шууд харагдана
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: res => res.setHeader('Cache-Control', 'no-cache') }));
+app.get('/health', (req, res) => res.send('ok ' + VERSION));
 
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 8 * 1024 });
