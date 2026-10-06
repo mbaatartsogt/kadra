@@ -26,10 +26,30 @@ function dropFromCarrier() {
 }
 
 const app = express();
-const VERSION = 'v5';
-// index.html-ийг хөтөч хадгалж (cache) үлдээхгүй — шинэ хувилбар шууд харагдана
+const VERSION = 'v6';
+const fs = require('fs');
+// Тоглоомын файлыг public/index.html эсвэл repo-гийн үндсэн index.html-ээс хайж, аль шинэ хувилбарыг нь сонгоно
+function pageInfo(file) {
+  try {
+    const html = fs.readFileSync(file, 'utf8');
+    const m = html.match(/id="ver">v(\d+)</);
+    return { file, html, ver: m ? +m[1] : 0 };
+  } catch (e) { return null; }
+}
+const pages = [path.join(__dirname, 'public', 'index.html'), path.join(__dirname, 'index.html')].map(pageInfo).filter(Boolean);
+const page = pages.sort((a, b) => b.ver - a.ver)[0];
+const sendPage = (req, res) => {
+  if (!page) return res.status(404).send('index.html олдсонгүй — public/index.html файлаа шалгана уу');
+  res.setHeader('Cache-Control', 'no-cache'); res.type('html').send(page.html);
+};
+app.get('/', sendPage);
+app.get('/index.html', sendPage);
 app.use(express.static(path.join(__dirname, 'public'), { setHeaders: res => res.setHeader('Cache-Control', 'no-cache') }));
-app.get('/health', (req, res) => res.send('ok ' + VERSION));
+app.get('/health', (req, res) => res.type('text').send(
+  'ok ' + VERSION + '\n' +
+  'тоглоом: ' + (page ? 'v' + page.ver + ' (' + path.relative(__dirname, page.file) + ')' : 'ОЛДСОНГҮЙ') + '\n' +
+  'олдсон файлууд: ' + pages.map(p => path.relative(__dirname, p.file) + ' = v' + p.ver).join(', ')
+));
 
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 8 * 1024 });
