@@ -37,6 +37,11 @@ body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
 .hpbar{flex:1;height:12px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);border-radius:6px}
 .hpbar i{background:#3ddc84;transition:width .15s, background .2s}
 #ver{position:fixed;left:6px;bottom:calc(4px + env(safe-area-inset-bottom,0px));font-size:10px;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+#pickPrompt,#holdHud{position:fixed;left:50%;top:58%;transform:translateX(-50%);background:rgba(10,12,16,.7);color:#fff;padding:8px 14px;border-radius:10px;font-size:14px;font-weight:700;z-index:6;pointer-events:none;text-align:center;min-width:220px}
+#pickPrompt b{background:#ffd84a;color:#15171c;border-radius:5px;padding:1px 7px;margin-right:4px}
+#holdHud{top:calc(100px + env(safe-area-inset-top,0px));border:2px solid #ffd84a}
+.pbar{height:6px;background:rgba(255,255,255,.2);border-radius:4px;margin-top:6px;overflow:hidden}
+.pbar i{display:block;height:100%;width:0;background:#ffd84a}
 #dmgFx{position:fixed;inset:0;pointer-events:none;z-index:3;opacity:0;transition:opacity .25s;
   background:radial-gradient(ellipse at center, transparent 55%, rgba(200,0,0,.55) 100%)}
 @media (pointer:coarse){#hudHp{bottom:calc(205px + env(safe-area-inset-bottom,0px))}}
@@ -166,7 +171,9 @@ body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
 <body>
 <div id="hudHp"><div id="ammoTxt" class="ammo"></div><div class="hprow"><span class="hpico">❤</span><div class="bar hpbar"><i id="php"></i></div><b id="hpNum">100</b></div></div>
 <div id="dmgFx"></div>
-<div id="ver">v4</div>
+<div id="ver">v5</div>
+<div id="pickPrompt" class="hidden"><b>E</b> дараад барих — Цом авах<div class="pbar"><i id="pickBar"></i></div></div>
+<div id="holdHud" class="hidden"><span id="holdTxt"></span><div class="pbar"><i id="holdBar"></i></div></div>
 <div id="compass"><div id="cstrip"></div><i id="cmark" class="hidden"></i><b id="cdeg">0</b></div>
 <div id="mission" class="panel hidden"><span class="mt" id="mlabel">Кадраг устга</span><b id="mtime">03:00</b><span class="md">Зай: <b id="mdist">?</b></span></div>
 <div id="endScreen" class="hidden"><div class="panel"><h2 id="endTitle"></h2><p id="endText"></p><button id="againBtn">Дахин тоглох</button></div></div>
@@ -200,6 +207,7 @@ body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
     <tr><td>Хулгана</td><td>Харах, зүүн товч — буудах</td></tr>
     <tr><td>Баруун товч / Z</td><td>Онилох</td></tr>
     <tr><td>R · 1–5 / Q · V</td><td>Цэнэглэх · Зэвсэг · Харагдац</td></tr>
+    <tr><td>E (барих)</td><td>Цом авах</td></tr>
   </table>
   <table class="mob">
     <tr><td>Зүүн дугуй</td><td>Хөдлөх</td></tr>
@@ -212,7 +220,7 @@ body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
   <div id="joy"><div id="knob"></div></div>
   <div id="btns">
     <button data-act="ads">Онилох</button>
-    <button data-act="challenge">Урих</button>
+    <button data-act="pick">Цом авах</button>
     <button data-act="jump">Үсрэх</button>
     <button data-act="reload">Цэнэг&shy;лэх</button>
     <button data-act="fpp">1-р бие</button>
@@ -1240,8 +1248,8 @@ function spawnNPC(pos){
   makeTag(f);
   npcs.push(f); return f;
 }
-for(let k=0;k<28;k++) spawnNPC(freePoint(0,-10,95,player.pos,5));
-for(let k=0;k<10;k++) spawnNPC(freePoint(0,0,190,player.pos,20));
+for(let k=0;k<20;k++) spawnNPC(freePoint(0,-10,95,player.pos,5));
+for(let k=0;k<6;k++) spawnNPC(freePoint(0,0,190,player.pos,20));
 
 function removeNPC(f){
   scene.remove(f.h.outer);
@@ -1346,7 +1354,7 @@ const CIVILIAN_PENALTY = 25;
 function npcKO(n){
   n.state='ko'; n.koT=0; n.attack=null; n.blocking=false; n.blockT=0;
   const W = WEAP[player.weapon];
-  if(n.isKadra){ kos++; $('kos').textContent = kos; player.reserve[W.id] += W.mag; }
+  if(n.isKadra){ kos++; $('kos').textContent = kos; player.reserve[W.id] += W.mag; cupApi().drop(n.pos.x, n.pos.z); }
   else {
     // энгийн иргэн алсан — өөрийн цуснаас хасна
     const pen = CIVILIAN_PENALTY;
@@ -1359,6 +1367,7 @@ function npcKO(n){
   addFeed('<b>'+esc(playerName)+'</b> ▸ '+(n.isKadra?'<b style="color:#ff6b6b">Кадра 🏆</b>':esc(n.name))+' <small>('+W.name+')</small>');
 }
 function playerKO(){
+  if(iCarry()) cupApi().lose(player.pos.x, player.pos.z);
   player.state='ko'; player.koT=0; player.attack=null; player.blocking=false;
   $('koScreen').classList.remove('hidden');
   $('koScreen').firstElementChild.textContent = playerName.toUpperCase()+' УНАЛАА';
@@ -1739,7 +1748,6 @@ addEventListener('keydown', e => {
     case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5':
       setWeapon(WEAP_ORDER[+e.code.slice(5)-1]); break;
     case 'Tab': cycleSelect(); break;
-    case 'KeyE': trySelectAt(innerWidth/2, innerHeight/2, true); break;
     case 'KeyF': challenge(); break;
     case 'Space': jump(); break;
     case 'KeyV': fpMode = !fpMode; toast(fpMode ? 'Нэгдүгээр биеийн харагдац' : 'Гуравдугаар биеийн харагдац', 1.2); break;
@@ -1844,11 +1852,12 @@ if(TOUCH){
       else if(act==='reload') startReload(player);
       else if(act==='fpp'){ fpMode = !fpMode; }
       else if(act==='ads'){ adsToggle = !adsToggle; b.classList.toggle('big', adsToggle); }
-      else if(act==='challenge') challenge();
+      else if(act==='pick'){ pickHeld = true; b.setPointerCapture(e.pointerId); }
       else if(act==='jump') jump();
       else if(act==='block'){ blockHeld = true; b.setPointerCapture(e.pointerId); }
     });
     if(act==='block'){ const off = () => blockHeld = false; b.addEventListener('pointerup',off); b.addEventListener('pointercancel',off); }
+    if(act==='pick'){ const off = () => pickHeld = false; b.addEventListener('pointerup',off); b.addEventListener('pointercancel',off); }
     if(act==='punch'){ const off = () => fireBtnHeld = false; b.addEventListener('pointerup',off); b.addEventListener('pointercancel',off); }
   });
 } else {
@@ -1924,6 +1933,7 @@ function updatePlayer(dt){
   const running = (keys.ShiftLeft || keys.ShiftRight || Math.hypot(joy.x,joy.y)>0.92) && !adsOn();
   let speed = p.blocking ? 1.5 : running ? 7 : 4;
   if(adsOn()) speed *= 0.55;
+  if(iCarry()) speed *= 0.85;
   if(p.attack) speed *= 0.25;
   if(p.hitstun>0) speed = 0;
   const fx = Math.sin(camYaw), fz = Math.cos(camYaw), rx = -fz, rz = fx;
@@ -2290,7 +2300,7 @@ function makeKadraTag(f){
 function spawnKadra(){
   const pos = freePoint(0,0,185,player.pos,90);
   const f = makeFighter({shirt:0x161616,pants:0x2b2f5a,skin:0xd9a77e,hair:0x111111,hairStyle:1,beard:true,name:'Кадра',
-    level:5, maxHp:150, dmgMul:0, walk:KADRA_JOG, run:KADRA_RUN, blockChance:0, gear:false, sleeve:true, weapon:'fist'});
+    level:5, maxHp:300, dmgMul:0, walk:KADRA_JOG, run:KADRA_RUN, blockChance:0, gear:false, sleeve:true, weapon:'fist'});
   f.isKadra = true; f.armed = false; f.state = 'kadra'; f.hp = f.maxHp; f.pos.copy(pos); f.retarget = 0;
   const cup = makeCup(); cup.scale.setScalar(2.1); cup.position.set(0,CUP_Y,0.06); f.h.root.add(cup); f.cup = cup;
   makeKadraTag(f);
@@ -2300,6 +2310,8 @@ function spawnKadra(){
 function updateKadra(n,dt){
   updateCommon(n,dt);
   if(n.state==='ko'){ n.koT += dt; return 0; }
+  // хурдан гүйж зугтаж байхдаа цус нь нөхөгдөнө
+  if(n.fleeing && n.hp<n.maxHp) n.hp = Math.min(n.maxHp, n.hp + KADRA_REGEN*dt);
   const d = distXZ(n,player);
   const threatened = player.state!=='ko' && (d<KADRA_ALERT || time-n.lastHit<4 || (time-lastShotT<1.5 && d<KADRA_ALERT*1.6));
   if(threatened && !n.fleeing){ n.fleeing = true; n.wanderTarget = null; n.retarget = 0; toast('🏃 Кадра таныг хараад зугтлаа!', 1.8); }
@@ -2358,6 +2370,7 @@ function reveal(sec){
 }
 function fmtTime(t){ t = Math.max(0,Math.ceil(t)); return String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0'); }
 function startMission(){
+  CUP.st = {phase:'kadra'}; CUP.pickT = 0;
   if(player.state!=='ko') player.hp = player.maxHp;
   if(MP.on){ mpStartRound(roundIdx()); return; }
   mission.lastDist = undefined; mission.trend = 0; mission.distT = 0;
@@ -2416,8 +2429,6 @@ function updateMission(dt){
       if(mission.kadra && mission.kadra.beacon) mission.kadra.beacon.visible = false;
       return;
     }
-    const k = mission.kadra;
-    if(k && k.state==='ko'){ mpClaim(); mission.state = 'won'; $('mlabel').textContent = 'Шинэ раунд эхлэхэд'; return; }
   }
   if(mission.state!=='running') return;
   if(!MP.on) mission.t -= dt;
@@ -2425,7 +2436,6 @@ function updateMission(dt){
   if(mission.t<=mission.nextReveal){ mission.nextReveal -= 30; reveal(6); }
   const k = mission.kadra;
   if(!MP.on){
-    if(k && k.state==='ko'){ endMission(true); return; }
     if(mission.t<=0){ mission.t = 0; endMission(false); return; }
   }
   // таймер
@@ -2433,13 +2443,15 @@ function updateMission(dt){
   if(tm.textContent!==txt) tm.textContent = txt;
   tm.classList.toggle('low', mission.t<30);
   // луужин дээрх тэмдэг, толгой дээрх сум
-  const show = mission.revealT>0 || (k && distXZ(k,player)<30);
-  if(k){
-    k.beacon.visible = mission.revealT>0;
-    k.tag.visible = distXZ(k,player)<70;
+  const cupPhase = CUP.st.phase!=='kadra';
+  const tgt = cupPhase ? (cupWorld.visible || CUP.st.phase==='dropped' ? cupWorld.position : null) : (k ? k.pos : null);
+  const show = cupPhase ? (!!tgt && !iCarry()) : (mission.revealT>0 || (k && distXZ(k,player)<30));
+  if(k && !cupPhase){ k.beacon.visible = mission.revealT>0; k.tag.visible = distXZ(k,player)<70; }
+  else if(k){ k.tag.visible = false; }
+  if(tgt){
     const cm = $('cmark');
     if(show){
-      const dx = k.pos.x-player.pos.x, dz = k.pos.z-player.pos.z;
+      const dx = tgt.x-player.pos.x, dz = tgt.z-player.pos.z;
       const bearing = ((-Math.atan2(dx,dz)*180/Math.PI)%360+360)%360;
       const hd = ((-camYaw*180/Math.PI)%360+360)%360;
       let diff = bearing-hd; diff = ((diff+540)%360)-180;
@@ -2448,7 +2460,7 @@ function updateMission(dt){
       cm.classList.remove('hidden');
     } else cm.classList.add('hidden');
     // зай: хаана ч байсан үргэлж харагдана
-    const dist = Math.hypot(k.pos.x-player.pos.x, k.pos.z-player.pos.z)*0.8;
+    const dist = Math.hypot(tgt.x-player.pos.x, tgt.z-player.pos.z)*0.8;
     mission.distT = (mission.distT||0) - dt;
     if(mission.distT<=0){
       const prev = mission.lastDist;
@@ -2503,6 +2515,7 @@ function kadraAt(path,ts){
   return {x:a.x+(b.x-a.x)*f, z:a.z+(b.z-a.z)*f, dir:Math.atan2(b.x-a.x,b.z-a.z), speed:Math.hypot(b.x-a.x,b.z-a.z)/span};
 }
 function mpStartRound(R){
+  CUP.st = {round:R, phase:'kadra'}; CUP.pickT = 0;
   if(player.state!=='ko') player.hp = player.maxHp;
   MP.round = R; MP.winner = null; MP.claimed = false;
   mission.lastDist = undefined; mission.trend = 0; mission.distT = 0; mission.revealT = 8;
@@ -2515,6 +2528,9 @@ function mpStartRound(R){
   mission.t = (st+ROUND_MS-mpNow())/1000; mission.nextReveal = Math.floor((mission.t-1)/30)*30;
   $('mission').classList.remove('hidden');
   $('mlabel').textContent = 'Раунд — Кадраг устга';
+  if(MP.unsubCup){ MP.unsubCup(); MP.unsubCup = null; }
+  if(!MP.isServer) MP.unsubCup = MP.db.doc('cup/r'+R).onSnapshot(sn => { const d = sn.exists ? sn.data() : null; if(d && d.round===MP.round) applyCup(d); }, () => {});
+  else if(MP.cupLatest && MP.cupLatest.round===R) setTimeout(() => applyCup(MP.cupLatest), 0);
   if(MP.unsubRound) MP.unsubRound();
   MP.unsubRound = MP.db.doc('rounds/r'+R).onSnapshot(snap => {
     const d = snap.exists ? snap.data() : null;
@@ -2527,14 +2543,14 @@ function mpRoundWon(d){
   const k = mission.kadra;
   if(k && k.state!=='ko'){ k.hp = 0; k.state = 'ko'; k.koT = 0; }
   const nm = String(d.name||'Тоглогч').slice(0,16);
-  if(d.winner===MP.myId) toast('🏆 Та Кадраг хамгийн түрүүнд устгалаа! Дараагийн раундад +1 оноо', 4);
-  else toast('🏆 '+nm+' Кадраг устгалаа!', 4);
-  addFeed('<b>'+esc(nm)+'</b> ▸ <b style="color:#ff6b6b">Кадра 🏆</b>');
+  if(d.winner===MP.myId) toast('🏆 Та цомыг хамгаалж яллаа! Дараагийн раундад +1 оноо', 4);
+  else toast('🏆 '+nm+' цомыг хамгаалж яллаа!', 4);
+  addFeed('<b>'+esc(nm)+'</b> 🏆 раундад яллаа');
   mission.state = 'won';
   $('mlabel').textContent = 'Шинэ раунд эхлэхэд';
 }
-async function mpClaim(){
-  if(MP.claimed || MP.winner) return; MP.claimed = true;
+async function mpRecordWin(){
+  if(MP.winner) return;
   const ref = MP.db.doc('rounds/r'+MP.round);
   try{
     const L = await ref.acquire({holder:MP.myId||'anon', ttlMs:4000});
@@ -2722,13 +2738,15 @@ async function socketBackend(){
   const setRounds = list => { roundsList = Array.isArray(list) ? list : []; roundsList.forEach(r => winners.set(r.round, r)); roundsSubs.forEach(f => f()); roundSubs.forEach(f => f()); };
   await new Promise((res,rej) => {
     const to = setTimeout(() => rej(new Error('timeout')), 15000);
-    sock.on('welcome', w => { clockOffset = (+w.now||Date.now()) - Date.now(); setRounds(w.rounds); setRS(w.rs); clearTimeout(to); res(); });
+    sock.on('welcome', w => { clockOffset = (+w.now||Date.now()) - Date.now(); setRounds(w.rounds); setRS(w.rs); if(w.cup) MP.cupLatest = w.cup; clearTimeout(to); res(); });
   });
   sock.on('connect', () => { MP.peerId = null; sock.emit('join', {pid, name:playerName}); });
   sock.emit('join', {pid, name:playerName});
   sock.on('peers', list => { peersList = Array.isArray(list) ? list : []; });
   sock.on('rounds', setRounds);
   sock.on('round', setRS);
+  MP.sock = sock;
+  sock.on('cup', st => { if(!st || typeof st!=='object') return; MP.cupLatest = st; if(st.round===MP.round) applyCup(st); });
   sock.on('roundWon', rec => { if(rec && typeof rec.round==='number'){ winners.set(rec.round, rec); roundSubs.forEach(f => f()); } });
   const room = {
     presence: o => { sock.volatile.emit('state', o); return Promise.resolve(); },
@@ -2778,6 +2796,132 @@ async function socketBackend(){
   }catch(e){ MP.on = false; }
 })();
 
+// ---------- Цом: Кадра унахад цом газарт унана → E-г 1с дарж авна → 10с хамгаалбал оноо ----------
+const CUP_HOLD = 10, CUP_PICK = 1, CUP_RANGE = 2.6, KADRA_REGEN = 15;
+const CUP = {st:{phase:'kadra'}, pickT:0, pending:false, winPending:false, lastSeen:0, lastPos:null, wdPending:false};
+const cupWorld = makeCup(); cupWorld.scale.setScalar(2.1); cupWorld.visible = false; scene.add(cupWorld);
+const cupRing = new THREE.Mesh(new THREE.RingGeometry(1.2,1.6,32), new THREE.MeshBasicMaterial({color:0xffd84a, transparent:true, opacity:0.75, depthWrite:false, fog:false, toneMapped:false}));
+cupRing.rotation.x = -Math.PI/2; cupRing.visible = false; scene.add(cupRing);
+const cupBeacon = (() => {
+  const mk = canvasTex(64,96,(g)=>{ g.fillStyle = '#ffd84a'; g.beginPath(); g.moveTo(8,8); g.lineTo(56,8); g.lineTo(32,60); g.closePath(); g.fill(); g.strokeStyle = '#7a5a00'; g.lineWidth = 4; g.stroke(); });
+  const b = new THREE.Sprite(new THREE.SpriteMaterial({toneMapped:false, map:mk, transparent:true, depthTest:false, depthWrite:false, fog:false}));
+  b.scale.set(1.6,2.4,1); b.renderOrder = 1002; b.visible = false; scene.add(b); return b;
+})();
+const _cupP = new THREE.Vector3();
+let pickHeld = false;
+const myCarrierId = () => MP.on ? myPeer() : 'me';
+const iCarry = () => CUP.st.phase==='carried' && CUP.st.carrier===myCarrierId();
+
+function applyCup(st){
+  st = st || {phase:'kadra'};
+  const prev = CUP.st;
+  if(prev.phase===st.phase && prev.carrier===st.carrier && prev.x===st.x && prev.z===st.z && prev.round===st.round) return;
+  CUP.st = st; CUP.pending = false;
+  const k = mission.kadra;
+  if(st.phase!=='kadra' && k){
+    if(k.state!=='ko'){ k.hp = 0; k.state = 'ko'; k.koT = 0; }
+    if(k.cup) k.cup.visible = false; if(k.beacon) k.beacon.visible = false;
+  }
+  const nm = String(st.cname||'Тоглогч').slice(0,16);
+  if(st.phase==='dropped'){
+    toast(prev.phase==='carried' ? '🏆 Цом газарт уналаа — булааж ав!' : '🏆 Кадра унаж цом газарт уналаа! Очоод E-г дарж аваарай', 3);
+  } else if(st.phase==='carried'){
+    CUP.lastSeen = mpNow(); CUP.lastPos = null;
+    if(st.carrier===myCarrierId()) toast('🏆 Та цомыг авлаа! '+CUP_HOLD+' секунд амьд үлдвэл оноо таных', 3);
+    else toast('⚠ '+nm+' цомыг авлаа! '+CUP_HOLD+' секундын дотор алж булаа!', 3);
+    addFeed('<b>'+esc(st.carrier===myCarrierId()?playerName:nm)+'</b> цомыг авлаа 🏆');
+  }
+}
+// --- ганцаараа тоглох үед ---
+const cupLocal = {
+  drop(x,z){ if(CUP.st.phase==='kadra') applyCup({round:MP.round, phase:'dropped', x, z}); },
+  pick(){ if(CUP.st.phase==='dropped') applyCup({...CUP.st, phase:'carried', carrier:'me', cname:playerName, since:mpNow()}); },
+  lose(x,z){ if(CUP.st.phase==='carried') applyCup({round:CUP.st.round, phase:'dropped', x, z}); },
+  win(){ if(CUP.st.phase==='carried'){ applyCup({...CUP.st, phase:'won'}); endMission(true); } },
+  forceDrop(){}
+};
+// --- claude.ai (db) ---
+async function cupTx(fn){
+  const R = MP.round, ref = MP.db.doc('cup/r'+R);
+  try{
+    const L = await ref.acquire({holder:MP.myId||'anon', ttlMs:4000}); if(!L.acquired) return false;
+    const sn = await ref.get(), cur = sn.exists ? sn.data() : {round:R, phase:'kadra'};
+    const nx = fn(cur); if(!nx) return false;
+    await ref.set(nx); return true;
+  }catch(e){ return false; }
+}
+const cupDb = {
+  drop:(x,z) => cupTx(c => c.phase==='kadra' ? {round:MP.round, phase:'dropped', x, z, at:Date.now()} : null),
+  pick:() => cupTx(c => (c.phase==='dropped' && Math.hypot(player.pos.x-c.x, player.pos.z-c.z)<CUP_RANGE+2)
+    ? {round:MP.round, phase:'carried', x:c.x, z:c.z, carrier:myPeer(), cpid:MP.myId||'anon', cname:playerName.slice(0,16), since:mpNow()} : null),
+  lose:(x,z) => cupTx(c => (c.phase==='carried' && c.carrier===myPeer()) ? {round:MP.round, phase:'dropped', x, z, at:Date.now()} : null),
+  win: async () => {
+    const ok = await cupTx(c => (c.phase==='carried' && c.carrier===myPeer() && mpNow()-c.since>=CUP_HOLD*1000-300) ? {...c, phase:'won'} : null);
+    if(ok) await mpRecordWin();
+  },
+  forceDrop:(x,z,carrier) => cupTx(c => (c.phase==='carried' && c.carrier===carrier) ? {round:MP.round, phase:'dropped', x, z, at:Date.now()} : null)
+};
+// --- өөрийн сервер (Socket.IO) ---
+const cupSrv = {
+  drop:(x,z) => MP.sock && MP.sock.emit('cup:drop', {round:MP.round, x, z}),
+  pick:() => MP.sock && MP.sock.emit('cup:pick', {round:MP.round}),
+  lose:(x,z) => MP.sock && MP.sock.emit('cup:lose', {round:MP.round, x, z}),
+  win:() => {}, forceDrop:() => {}
+};
+const cupApi = () => !MP.on ? cupLocal : (MP.isServer ? cupSrv : cupDb);
+
+function updateCup(dt){
+  const st = CUP.st, ph = st.phase;
+  let pos = null;
+  if(ph==='dropped'){
+    pos = _cupP.set(st.x, groundAt(st.x,st.z,0)+0.05, st.z);
+    cupRing.position.set(st.x, pos.y+0.02, st.z); cupRing.scale.setScalar(1+Math.sin(time*4)*0.12);
+  } else if(ph==='carried'){
+    if(st.carrier===myCarrierId()) pos = _cupP.set(player.pos.x, player.pos.y+2.35, player.pos.z);
+    else { const r = MP.remotes.get(st.carrier); if(r) pos = _cupP.set(r.f.pos.x, r.f.pos.y+2.35, r.f.pos.z); }
+  }
+  if(pos){ cupWorld.position.copy(pos); cupWorld.rotation.y += dt*1.8; }
+  cupWorld.visible = !!pos && !(iCarry() && (fpMode || adsOn()));
+  cupRing.visible = ph==='dropped';
+  cupBeacon.visible = !!pos && !iCarry();
+  if(pos) cupBeacon.position.set(pos.x, pos.y+(ph==='dropped'?3.4:1.9), pos.z);
+  // авах
+  const pp = $('pickPrompt');
+  const near = ph==='dropped' && player.state!=='ko' && Math.hypot(player.pos.x-st.x, player.pos.z-st.z)<CUP_RANGE && Math.abs(player.pos.y-pos.y)<2.2;
+  if(near){
+    pp.classList.remove('hidden');
+    const holding = keys.KeyE || pickHeld;
+    if(holding && !CUP.pending){
+      CUP.pickT += dt;
+      if(CUP.pickT>=CUP_PICK){ CUP.pending = true; CUP.pickT = 0; cupApi().pick(); setTimeout(() => { CUP.pending = false; }, 1500); }
+    } else if(!holding) CUP.pickT = 0;
+    $('pickBar').style.width = Math.min(100, CUP.pickT/CUP_PICK*100)+'%';
+  } else { pp.classList.add('hidden'); CUP.pickT = 0; }
+  // хамгаалах
+  const hb = $('holdHud');
+  if(iCarry() && player.state!=='ko'){
+    const el = (mpNow()-st.since)/1000, left = Math.max(0, CUP_HOLD-el);
+    hb.classList.remove('hidden');
+    $('holdTxt').textContent = '🏆 Цомыг хамгаал: '+left.toFixed(1)+' с';
+    $('holdBar').style.width = Math.min(100, el/CUP_HOLD*100)+'%';
+    if(el>=CUP_HOLD && !CUP.winPending){ CUP.winPending = true; cupApi().win(); setTimeout(() => { CUP.winPending = false; }, 2000); }
+  } else hb.classList.add('hidden');
+  // claude.ai: цом барьсан тоглогч гарч явбал цомыг буулгана
+  if(MP.on && !MP.isServer && ph==='carried' && st.carrier!==myPeer()){
+    const r = MP.remotes.get(st.carrier);
+    if(r){ CUP.lastSeen = mpNow(); CUP.lastPos = {x:r.f.pos.x, z:r.f.pos.z}; if(r.f.state==='ko' && !CUP.wdPending){ CUP.wdPending = true; cupDb.forceDrop(r.f.pos.x, r.f.pos.z, st.carrier).finally(() => setTimeout(() => { CUP.wdPending = false; }, 2000)); } }
+    else if(mpNow()-CUP.lastSeen>4000 && !CUP.wdPending){
+      CUP.wdPending = true; const lp = CUP.lastPos || {x:st.x, z:st.z};
+      cupDb.forceDrop(lp.x, lp.z, st.carrier).finally(() => setTimeout(() => { CUP.wdPending = false; }, 3000));
+    }
+  }
+  // даалгаврын шошго
+  if(mission.state==='running'){
+    const lbl = ph==='kadra' ? 'Кадраг устга' : ph==='dropped' ? 'Цомыг ав!' : iCarry() ? 'Цомыг хамгаал!' : ph==='carried' ? 'Булаа: '+String(st.cname||'').slice(0,12) : 'Раунд дууслаа';
+    if($('mlabel').textContent!==lbl) $('mlabel').textContent = lbl;
+  }
+}
+
 // ---------- Loop ----------
 let last = performance.now();
 function loop(now){
@@ -2792,6 +2936,7 @@ function loop(now){
     npcs.forEach(n => { if(n.h.full) animate(n,dt,speeds.get(n)||0); else n.h.outer.rotation.y = n.rotY; });
     updateHUD(dt);
     updateMission(dt);
+    updateCup(dt);
     mpUpdate(dt, now);
   }
   updateCamera(dt);
