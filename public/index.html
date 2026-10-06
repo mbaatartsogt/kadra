@@ -266,7 +266,7 @@ const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 700)
 scene.add(new THREE.HemisphereLight(0xdfeaf7, 0x55504a, 0.62));
 const sun = new THREE.DirectionalLight(0xfff2de, 1.0);
 sun.castShadow = true;
-sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, {left:-40,right:40,top:40,bottom:-40,near:1,far:150});
 sun.shadow.normalBias = 0.02;
 sun.shadow.bias = -0.0005;
@@ -2176,8 +2176,8 @@ function updateHUD(dt){
 
   // нэрс
   for(const n of npcs){
-    const dpl = distXZ(n,player), near = dpl<32;
-    const shown = dpl<130 || n.isKadra; if(n.h.outer.visible!==shown) n.h.outer.visible = shown;
+    const dpl = distXZ(n,player), near = dpl<LOD_DETAIL;
+    const shown = dpl<LOD_DRAW || n.isKadra; if(n.h.outer.visible!==shown) n.h.outer.visible = shown;
     if(near!==n.h.detailOn){ n.h.detailOn = near; for(const m of n.h.details) m.visible = near; }
     if(!n.tag || n.isKadra) continue;
     const vis = n.state!=='ko' && distXZ(n,player)<30;
@@ -2286,7 +2286,7 @@ function updateKadra(n,dt){
   const threatened = player.state!=='ko' && (d<KADRA_ALERT || time-n.lastHit<4 || (time-lastShotT<1.5 && d<KADRA_ALERT*1.6));
   if(threatened && !n.fleeing){ n.fleeing = true; n.wanderTarget = null; n.retarget = 0; toast('🏃 Кадра таныг хараад зугтлаа!', 1.8); }
   if(MP.on && n.path){
-    const k = kadraAt(n.path, (mpNow()-MP.round*ROUND_MS)/1000);
+    const k = kadraAt(n.path, Math.max(0,(mpNow()-MP.roundStart)/1000));
     if(threatened){ n.calmT = 0; n.returning = false; }
     else if(n.fleeing){ n.calmT = (n.calmT||0)+dt; if(n.calmT>4){ n.fleeing = false; n.returning = true; } }
     if(!n.fleeing && n.returning){
@@ -2376,13 +2376,22 @@ function restartMission(){
 }
 function updateMission(dt){
   if(MP.on && started){
-    const R = roundIdx();
-    if(R!==MP.round){
+    const rs = MP.rs, now = mpNow();
+    if(!rs){ const tm = $('mtime'); if(tm.textContent!=='--:--') tm.textContent = '--:--'; return; }
+    if(now>=rs.start && rs.round!==MP.round){
       const prev = MP.winner;
-      mpStartRound(R);
+      mpStartRound(rs.round);
       toast(prev ? '🔔 Шинэ раунд! '+String(prev.name||'Тоглогч').slice(0,16)+' +1 оноо авлаа' : '🔔 Шинэ раунд эхэллээ!', 4);
     }
-    mission.t = ((MP.round+1)*ROUND_MS-mpNow())/1000;
+    if(rs.round!==MP.round || now<rs.start){
+      // раунд хоорондын завсарлага
+      if(mission.state==='running') mission.state = 'won';
+      if($('mlabel').textContent!=='Шинэ раунд эхлэхэд') $('mlabel').textContent = 'Шинэ раунд эхлэхэд';
+      mission.t = Math.max(0,(rs.start-now)/1000);
+    } else {
+      mission.t = (rs.start+ROUND_MS-now)/1000;
+      if(mission.t<=0) mpAdvanceTimeout();
+    }
     if(mission.state!=='running'){
       const tm = $('mtime'), txt = fmtTime(mission.t); if(tm.textContent!==txt) tm.textContent = txt;
       tm.classList.remove('low'); $('cmark').classList.add('hidden');
@@ -2390,7 +2399,7 @@ function updateMission(dt){
       return;
     }
     const k = mission.kadra;
-    if(k && k.state==='ko'){ mpClaim(); mission.state = 'won'; $('mlabel').textContent = 'Дараагийн раунд хүртэл'; return; }
+    if(k && k.state==='ko'){ mpClaim(); mission.state = 'won'; $('mlabel').textContent = 'Шинэ раунд эхлэхэд'; return; }
   }
   if(mission.state!=='running') return;
   if(!MP.on) mission.t -= dt;
@@ -2480,10 +2489,12 @@ function mpStartRound(R){
   MP.round = R; MP.winner = null; MP.claimed = false;
   mission.lastDist = undefined; mission.trend = 0; mission.distT = 0; mission.revealT = 8;
   if(mission.kadra) removeNPC(mission.kadra);
+  const st = (MP.rs && MP.rs.round===R) ? MP.rs.start : mpNow();
+  MP.roundStart = st;
   const k = spawnKadra(); k.path = buildKadraPath(R);
-  const p = kadraAt(k.path, (mpNow()-R*ROUND_MS)/1000); k.pos.set(p.x,0,p.z);
+  const p = kadraAt(k.path, Math.max(0,(mpNow()-st)/1000)); k.pos.set(p.x,0,p.z);
   mission.state = 'running';
-  mission.t = ((R+1)*ROUND_MS-mpNow())/1000; mission.nextReveal = Math.floor((mission.t-1)/30)*30;
+  mission.t = (st+ROUND_MS-mpNow())/1000; mission.nextReveal = Math.floor((mission.t-1)/30)*30;
   $('mission').classList.remove('hidden');
   $('mlabel').textContent = 'Раунд — Кадраг устга';
   if(MP.unsubRound) MP.unsubRound();
@@ -2502,7 +2513,7 @@ function mpRoundWon(d){
   else toast('🏆 '+nm+' Кадраг устгалаа!', 4);
   addFeed('<b>'+esc(nm)+'</b> ▸ <b style="color:#ff6b6b">Кадра 🏆</b>');
   mission.state = 'won';
-  $('mlabel').textContent = 'Дараагийн раунд хүртэл';
+  $('mlabel').textContent = 'Шинэ раунд эхлэхэд';
 }
 async function mpClaim(){
   if(MP.claimed || MP.winner) return; MP.claimed = true;
@@ -2511,10 +2522,38 @@ async function mpClaim(){
     const L = await ref.acquire({holder:MP.myId||'anon', ttlMs:4000});
     if(!L.acquired) return;
     const snap = await ref.get(), d = snap.exists ? snap.data() : null;
-    if(!d || !d.winner) await ref.set({round:MP.round, winner:MP.myId||'anon', name:playerName.slice(0,16), at:Date.now()});
+    if(!d || !d.winner){
+      await ref.set({round:MP.round, winner:MP.myId||'anon', name:playerName.slice(0,16), at:Date.now()});
+      // Кадра алагдмагц раунд шууд дуусч, 5 секундын дараа шинэ раунд эхэлнэ
+      if(!MP.isServer && MP.rs && MP.rs.round===MP.round) await MP.db.doc('state/round').set({round:MP.round+1, start:mpNow()+5000});
+    }
   }catch(e){
     if(e && e.code==='invalid_argument'){ MP.canWrite = false; toast('Танд зөвхөн үзэх эрх байгаа тул оноо бүртгэгдэхгүй', 3.5); }
   }
+}
+// хугацаа дуусч хэн ч алаагүй бол (claude.ai горимд) аль нэг тоглогч дараагийн раундыг эхлүүлнэ
+async function mpAdvanceTimeout(){
+  if(MP.isServer || MP.advancing || !MP.rs) return;
+  const R = MP.rs.round; MP.advancing = true;
+  try{
+    const ref = MP.db.doc('state/round');
+    const L = await ref.acquire({holder:MP.myId||'anon', ttlMs:4000});
+    if(L.acquired){
+      const snap = await ref.get(), d = snap.exists ? snap.data() : null;
+      if(!d || d.round===R) await ref.set({round:R+1, start:mpNow()+3000});
+    }
+  }catch(e){}
+  setTimeout(() => { MP.advancing = false; }, 3000);
+}
+function mpWatchRoundState(){
+  MP.db.doc('state/round').onSnapshot(snap => {
+    const d = snap.exists ? snap.data() : null;
+    if(d && isFinite(d.round) && isFinite(d.start)) MP.rs = {round:+d.round, start:+d.start};
+    else if(!MP.isServer && !MP.rsInit){
+      MP.rsInit = true;
+      MP.db.doc('state/round').set({round:Math.floor(mpNow()/ROUND_MS)+1, start:mpNow()}).catch(()=>{});
+    }
+  }, () => {});
 }
 function renderScores(){
   const box = $('scoreboard'); if(!MP.on){ box.classList.add('hidden'); return; }
@@ -2616,10 +2655,19 @@ function mpUpdate(dt, now){
     let r = MP.remotes.get(p.peer);
     if(!r){ r = makeRemote(p.peer, pr); MP.remotes.set(p.peer, r); }
     const f = r.f;
-    const tx = clamp(+pr.x,-BOUND,BOUND), tz = clamp(+pr.z,-BOUND,BOUND), ty = clamp(+pr.y||0,0,40);
-    if(r.first){ f.pos.set(tx,ty,tz); r.first = false; }
-    const ox = f.pos.x, oz = f.pos.z, k = 1-Math.exp(-12*dt);
-    f.pos.x += (tx-ox)*k; f.pos.y += (ty-f.pos.y)*k; f.pos.z += (tz-oz)*k;
+    let tx = clamp(+pr.x,-BOUND,BOUND), tz = clamp(+pr.z,-BOUND,BOUND); const ty = clamp(+pr.y||0,0,40);
+    if(r.first){ f.pos.set(tx,ty,tz); r.first = false; r.lx = tx; r.lz = tz; r.lt = now; r.vx = 0; r.vz = 0; }
+    if(tx!==r.lx || tz!==r.lz){
+      const el = Math.max(0.05,(now-r.lt)/1000);
+      r.vx = clamp((tx-r.lx)/el,-12,12); r.vz = clamp((tz-r.lz)/el,-12,12);
+      r.lx = tx; r.lz = tz; r.lt = now;
+    } else if(now-r.lt>250){ r.vx = 0; r.vz = 0; }
+    // сүүлийн хурдаар бага зэрэг урьдчилан тооцоолж, жигд хөдөлгөнө
+    const ahead = Math.min(0.2,(now-r.lt)/1000);
+    tx += r.vx*ahead; tz += r.vz*ahead;
+    const ox = f.pos.x, oz = f.pos.z, k = 1-Math.exp(-14*dt);
+    if(Math.hypot(tx-ox,tz-oz)>8) f.pos.set(tx,ty,tz);
+    f.pos.x += (tx-f.pos.x)*k; f.pos.y += (ty-f.pos.y)*k; f.pos.z += (tz-f.pos.z)*k;
     f.rotY = angLerp(f.rotY, +pr.r||0, Math.min(1,dt*12));
     f.aimPitch = clamp(+pr.p||0,-0.9,0.9);
     const w = WEAP_ORDER.includes(pr.w) ? pr.w : 'rifle';
@@ -2651,15 +2699,18 @@ async function socketBackend(){
   let peersList = [], roundsList = [];
   const winners = new Map(), roundSubs = new Set(), roundsSubs = new Set();
   let pid; try{ pid = localStorage.getItem('talbai_pid'); if(!pid){ pid = 'p'+Math.random().toString(36).slice(2,12); localStorage.setItem('talbai_pid', pid); } }catch(e){ pid = 'p'+Math.random().toString(36).slice(2,12); }
+  let rsState = null; const rsSubs = new Set();
+  const setRS = r => { if(r && isFinite(r.round) && isFinite(r.start)){ rsState = {round:+r.round, start:+r.start}; rsSubs.forEach(f => f()); } };
   const setRounds = list => { roundsList = Array.isArray(list) ? list : []; roundsList.forEach(r => winners.set(r.round, r)); roundsSubs.forEach(f => f()); roundSubs.forEach(f => f()); };
   await new Promise((res,rej) => {
     const to = setTimeout(() => rej(new Error('timeout')), 15000);
-    sock.on('welcome', w => { clockOffset = (+w.now||Date.now()) - Date.now(); setRounds(w.rounds); clearTimeout(to); res(); });
+    sock.on('welcome', w => { clockOffset = (+w.now||Date.now()) - Date.now(); setRounds(w.rounds); setRS(w.rs); clearTimeout(to); res(); });
   });
   sock.on('connect', () => { MP.peerId = null; sock.emit('join', {pid, name:playerName}); });
   sock.emit('join', {pid, name:playerName});
   sock.on('peers', list => { peersList = Array.isArray(list) ? list : []; });
   sock.on('rounds', setRounds);
+  sock.on('round', setRS);
   sock.on('roundWon', rec => { if(rec && typeof rec.round==='number'){ winners.set(rec.round, rec); roundSubs.forEach(f => f()); } });
   const room = {
     presence: o => { sock.volatile.emit('state', o); return Promise.resolve(); },
@@ -2670,7 +2721,11 @@ async function socketBackend(){
   };
   const snap = w => ({exists:!!w, data:() => w});
   const db = {
-    doc: path => { const R = +String(path).replace('rounds/r',''); return {
+    doc: path => { if(path==='state/round') return {
+      onSnapshot: fn => { const f = () => fn(snap(rsState)); rsSubs.add(f); f(); return () => rsSubs.delete(f); },
+      acquire: async () => ({acquired:false}), get: async () => snap(rsState), set: async () => {}
+    };
+    const R = +String(path).replace('rounds/r',''); return {
       onSnapshot: fn => { const f = () => fn(snap(winners.get(R))); roundSubs.add(f); f(); return () => roundSubs.delete(f); },
       acquire: async () => ({acquired:true}),
       get: async () => snap(winners.get(R)),
@@ -2680,6 +2735,7 @@ async function socketBackend(){
       const f = () => fn({docs: roundsList.map(r => ({data:() => r}))}); roundsSubs.add(f); f(); return () => roundsSubs.delete(f);
     } }) }) })
   };
+  MP.isServer = true;
   return {db, room, user:{ id: async () => pid }};
 }
 (async function initMP(){
@@ -2699,7 +2755,7 @@ async function socketBackend(){
     db.collection('rounds').orderBy('round','desc').limit(1000).onSnapshot(snap => {
       MP.rounds = snap.docs.map(d => d.data()); renderScores();
     }, () => {});
-    if(started) mpStartRound(roundIdx());
+    mpWatchRoundState();
     renderScores();
   }catch(e){ MP.on = false; }
 })();
@@ -2728,13 +2784,17 @@ function loop(now){
   frameAvg = frameAvg*0.95 + Math.min(now-lastFrameT, 100)*0.05; lastFrameT = now;
   if(now-lastAdapt>3000){
     lastAdapt = now;
-    if(frameAvg>30 && !document.hidden && sun.shadow.mapSize.x>2048){
-      sun.shadow.mapSize.set(2048,2048); if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map = null; }
+    if(frameAvg>30 && !document.hidden && qualityTier<3){
+      qualityTier++;
+      if(qualityTier===1){ LOD_DETAIL = 16; LOD_DRAW = 90; }
+      if(qualityTier===2){ sun.shadow.mapSize.set(1024,1024); if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map = null; } LOD_DRAW = 70; }
+      if(qualityTier===3){ for(const n of npcs) n.h.outer.traverse(o=>{ if(o.isMesh) o.castShadow = false; }); }
     }
     syncSize();
   }
   requestAnimationFrame(loop);
 }
+let qualityTier = 0, LOD_DETAIL = 32, LOD_DRAW = 130;
 let frameN = 0, frameAvg = 16, lastFrameT = performance.now(), lastAdapt = performance.now();
 refreshWeaponBar(); buildVM();
 // initial pose

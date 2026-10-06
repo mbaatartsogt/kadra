@@ -5,7 +5,15 @@ const express = require('express');
 const { Server } = require('socket.io');
 
 const ROUND_MS = 180 * 1000;               // нэг раунд = 3 минут
-const roundIdx = () => Math.floor(Date.now() / ROUND_MS);
+const BREAK_KILL_MS = 5000;                 // Кадра алагдсаны дараах завсарлага
+const BREAK_TIMEOUT_MS = 3000;              // хугацаа дууссаны дараах завсарлага
+
+// одоогийн раунд: дугаар ба эхлэх цаг. Кадра алагдмагц раунд шууд дуусна.
+let rs = { round: Math.floor(Date.now() / 1000), start: Date.now() + 2000 };
+function nextRound(breakMs) {
+  rs = { round: rs.round + 1, start: Date.now() + breakMs };
+  io.emit('round', rs);
+}
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
@@ -23,7 +31,7 @@ const num = v => (Number.isFinite(+v) ? +v : 0);
 
 io.on('connection', socket => {
   players.set(socket.id, { pid: null, name: 'Тоглогч', state: null });
-  socket.emit('welcome', { now: Date.now(), id: socket.id, rounds });
+  socket.emit('welcome', { now: Date.now(), id: socket.id, rounds, rs });
 
   socket.on('join', d => {
     const p = players.get(socket.id); if (!p || !d) return;
@@ -56,14 +64,15 @@ io.on('connection', socket => {
 
   // Кадраг хэн түрүүлж алсныг сервер шийднэ
   socket.on('claim', d => {
-    const R = roundIdx();
-    if (!d || num(d.round) !== R || winnerOf.has(R)) return;
+    const R = rs.round;
+    if (!d || num(d.round) !== R || winnerOf.has(R) || Date.now() < rs.start) return;
     const p = players.get(socket.id);
     const rec = { round: R, winner: str(d.winner, 40) || (p && p.pid) || socket.id, name: str(d.name) || (p ? p.name : 'Тоглогч'), at: Date.now() };
     winnerOf.set(R, rec);
     rounds.unshift(rec); if (rounds.length > 1000) rounds.pop();
     io.emit('roundWon', rec);
     io.emit('rounds', rounds);
+    nextRound(BREAK_KILL_MS);
   });
 
   socket.on('disconnect', () => players.delete(socket.id));
@@ -76,8 +85,11 @@ setInterval(() => {
   io.volatile.emit('peers', peers);
 }, 100);
 
+// 3 минут дуусч хэн ч алаагүй бол дараагийн раунд
+setInterval(() => { if (Date.now() > rs.start + ROUND_MS) nextRound(BREAK_TIMEOUT_MS); }, 500);
+
 // хуучин раундын бичлэгийг цэвэрлэнэ
-setInterval(() => { const R = roundIdx(); for (const k of winnerOf.keys()) if (k < R - 5) winnerOf.delete(k); }, 60 * 1000);
+setInterval(() => { for (const k of winnerOf.keys()) if (k < rs.round - 5) winnerOf.delete(k); }, 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log('Сервер ажиллаж байна: порт ' + PORT));
