@@ -1,0 +1,16 @@
+{
+  "name": "talbai-tulaan",
+  "version": "1.0.0",
+  "description": "Сүхбаатарын талбайн тулаан 3D — олон тоглогчийн сервер",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
